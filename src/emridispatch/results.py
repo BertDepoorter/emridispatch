@@ -415,6 +415,30 @@ def _load_json(path):
         return json.load(fh)
 
 
+def _load_fixed(run_dir):
+    """{index: value} from fixed_params.json; {} when nothing was fixed."""
+    spec = _load_json(os.path.join(run_dir, "fixed_params.json"))
+    if spec is None:
+        return {}
+    return {int(i): float(v) for i, v in zip(spec["indices"], spec["values"])}
+
+
+def _embed_fixed(samples, fixed):
+    """(..., nfree) raw sampling coords -> (..., NDIM), pinned rows re-inserted.
+
+    Fixed rows sit outside the reparam block, so the pinned value is valid in
+    sampling and physical coordinates alike.
+    """
+    if not fixed:
+        return samples
+    free = [i for i in range(NDIM) if i not in fixed]
+    out = np.empty(samples.shape[:-1] + (NDIM,))
+    out[..., free] = samples
+    for i, v in fixed.items():
+        out[..., i] = v
+    return out
+
+
 def _load_sidecars(run_dir, samples):
     """Backend-agnostic sidecar files -> shared Results kwargs.
 
@@ -591,11 +615,13 @@ def _convert_impulse(run_dir):
     nsteps = min(len(a) for a in arrs)
     if nsteps < 1:
         raise ValueError(f"{run_dir}: empty chain files")
+    fixed = _load_fixed(run_dir)
+    nfree = NDIM - len(fixed)
     widths = sorted({a.shape[1] for a in arrs})
-    if widths != [NDIM + _EXTRA_COLS]:
+    if widths != [nfree + _EXTRA_COLS]:
         raise ValueError(
             f"{run_dir}: chain files have {', '.join(map(str, widths))} "
-            f"column(s), expected {NDIM + _EXTRA_COLS} ({NDIM} parameters + "
+            f"column(s), expected {nfree + _EXTRA_COLS} ({nfree} parameters + "
             f"lnlike, lnprob, accepted, temperature). Convert with the "
             f"emridispatch version that wrote them.")
     if any(len(a) != nsteps for a in arrs):
@@ -603,11 +629,11 @@ def _convert_impulse(run_dir):
                        nsteps)
     raw = np.stack([a[:nsteps] for a in arrs])       # (ntemps, nsteps, ncols)
 
-    samples = raw[:, :, :NDIM]
-    lnlike = raw[:, :, NDIM]
-    lnprob = raw[:, :, NDIM + 1]
-    accepted = raw[:, :, NDIM + 2]
-    temps_hist = raw[:, :, NDIM + 3]
+    samples = _embed_fixed(raw[:, :, :nfree], fixed)
+    lnlike = raw[:, :, nfree]
+    lnprob = raw[:, :, nfree + 1]
+    accepted = raw[:, :, nfree + 2]
+    temps_hist = raw[:, :, nfree + 3]
     betas = _betas_from_temperatures(temps_hist).T
     lnprior = _untemper(lnprob, betas.T, lnlike, run_dir)
     temperatures = temps_hist[:, -1]
@@ -659,9 +685,11 @@ def _convert_eryn(run_dir):
         betas = g["betas"][:it]                      # (nsteps, ntemps)
         acc_counts = g["accepted"][()]               # (ntemps, nwalkers) cumulative
 
-    if chain.shape[-1] != NDIM:
+    fixed = _load_fixed(run_dir)
+    if chain.shape[-1] != NDIM - len(fixed):
         raise ValueError(
-            f"{path}: chain has ndim={chain.shape[-1]}, expected {NDIM}")
+            f"{path}: chain has ndim={chain.shape[-1]}, expected "
+            f"{NDIM - len(fixed)} ({NDIM} minus {len(fixed)} fixed)")
     nsteps, ntemps, nwalkers, _ = chain.shape
 
     def flatten(a):  # (nsteps, ntemps, nwalkers, ...) -> (ntemps, nsteps*nwalkers, ...)
@@ -673,7 +701,7 @@ def _convert_eryn(run_dir):
                     "rung as the beta = 1 posterior", path)
         betas = np.ones((nsteps, ntemps))
 
-    samples = flatten(chain)
+    samples = _embed_fixed(flatten(chain), fixed)
     lnlike = flatten(log_like)
     lnprior = flatten(log_prior)
     beta_draws = np.repeat(betas.T[:, :, None], nwalkers, axis=2).reshape(

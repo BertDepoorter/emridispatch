@@ -149,6 +149,10 @@ prior:
   #   e: 1.0e-5
   #   luminosity_distance: 0.05
   # covariance_file: fisher_cov.npz   # npz with keys: cov (6x6), order
+  # fixed: [q_s, phi_s, q_k, phi_k, phi_phi, phi_r]  # pin at the truth; every
+  #   backend samples only the free rows, results.h5 keeps all 12 (constant).
+  #   A mapping {name: value} pins explicit sampling-vector values instead.
+  #   Must not overlap reparam.idx unless reparam mode is "off".
 
 # --------------------------------------------------------------------------
 # Per-parameter prior overrides (optional). By default every parameter is

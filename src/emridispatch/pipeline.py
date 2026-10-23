@@ -104,6 +104,52 @@ def _write_injection_truth(outdir, inj_params, truth_vec):
         json.dump(truth, fh, indent=2)
 
 
+FIXED_NAME = "fixed_params.json"
+
+
+def resolve_fixed(spec, truth_vec, reparam_idx, reparam_mode):
+    """prior.fixed -> {index: value}, sampling-vector units.
+
+    A list pins each name at the truth; a mapping gives explicit values.
+    Fixed rows must lie outside a whitened reparam block, whose coordinates
+    mix every row of the block.
+    """
+    if not spec:
+        return {}
+    items = (spec.items() if isinstance(spec, dict)
+             else ((name, None) for name in spec))
+    fixed = {}
+    for name, value in items:
+        if name not in PARAM_NAMES:
+            raise ValueError(
+                f"prior.fixed: unknown parameter {name!r}; known: {PARAM_NAMES}")
+        i = PARAM_NAMES.index(name)
+        fixed[i] = float(truth_vec[i] if value is None else value)
+    clash = sorted(set(fixed) & set(np.asarray(reparam_idx).tolist()))
+    if clash and reparam_mode in ("auto", "grid"):
+        raise ValueError(
+            f"prior.fixed: {[PARAM_NAMES[i] for i in clash]} lie inside the "
+            f"reparam block {list(reparam_idx)}; drop them from reparam.idx or "
+            f"set reparam.mode: \"off\"")
+    if len(fixed) == NDIM:
+        raise ValueError("prior.fixed: every parameter is fixed")
+    return fixed
+
+
+def _write_fixed(outdir, fixed):
+    """fixed_params.json for the converters, which re-insert the pinned rows."""
+    path = os.path.join(outdir, FIXED_NAME)
+    if not fixed:
+        if os.path.exists(path):
+            os.remove(path)     # stale sidecar from an earlier config
+        return
+    order = sorted(fixed)
+    with open(path, "w") as fh:
+        json.dump({"names": [PARAM_NAMES[i] for i in order],
+                   "indices": order,
+                   "values": [fixed[i] for i in order]}, fh, indent=2)
+
+
 def fisher_key_from_config(cfg):
     channels = cfg.data.channels
     return fisher_cache_key(
@@ -187,6 +233,11 @@ def build_problem(cfg, resume=True):
     reparam.save(os.path.join(outdir, "reparam_transform.npz"), reparam_mode)
     logger.info("reparam: mode=%s, block dims=%s", reparam_mode, list(reparam.idx))
 
+    fixed = resolve_fixed(cfg.prior.fixed, truth_vec, reparam.idx, reparam_mode)
+    _write_fixed(outdir, fixed)
+    if fixed:
+        logger.info("fixed: %s", {PARAM_NAMES[i]: v for i, v in sorted(fixed.items())})
+
     # Dispersed start in physical space, clipped to the (possibly overridden)
     # prior bounds; backends map it through the reparam via problem.wrapped().
     x0 = initial_point(start_mode, truth_vec, sample_cov, prior.mins, prior.maxes,
@@ -198,6 +249,7 @@ def build_problem(cfg, resume=True):
                 optimal_snr=model.optimal_snr,
                 notch_drift=getattr(model, "_notch_drift", None),
                 response=str(cfg.data.response),
+                fixed=[PARAM_NAMES[i] for i in sorted(fixed)],
                 add_noise=bool(cfg.data.add_noise),
                 noise_seed=int(cfg.data.noise_seed))
 
@@ -206,7 +258,7 @@ def build_problem(cfg, resume=True):
         lnlike=model, prior=prior,
         reparam=reparam, reparam_mode=reparam_mode,
         x0=x0, proposal_cov=sample_cov, periodic=periodic,
-        truth=truth_vec, outdir=outdir, seed=seed, meta=meta,
+        truth=truth_vec, outdir=outdir, seed=seed, meta=meta, fixed=fixed,
     )
 
 

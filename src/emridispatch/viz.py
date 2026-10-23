@@ -148,9 +148,16 @@ def make_plots(results, temps=(0,), all_temps=False, burn=0, physical=True,
         for r in rungs
     ]
 
+    # Drop constant columns (prior.fixed): corner rejects zero dynamic range.
+    cold_idx = rungs.index(min(rungs))
+    keep = np.ptp(rung_data[cold_idx][1], axis=0) > 0
+    if not keep.all():
+        labels = [lab for lab, k in zip(labels, keep) if k]
+        truth = None if truth is None else np.asarray(truth)[keep]
+        rung_data = [(lab, s[:, keep]) for lab, s in rung_data]
+
     os.makedirs(outdir, exist_ok=True)
     written = []
-    cold_idx = rungs.index(min(rungs))
     written.append(plot_corner(
         rung_data[cold_idx][1], labels, truth=truth,
         out_path=os.path.join(outdir, CORNER_NAME)))

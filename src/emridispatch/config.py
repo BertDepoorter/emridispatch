@@ -90,6 +90,9 @@ PRIOR_DEFAULTS = {
     "box_scale": 3.0, "fisher": "auto", "angle_sigma": 0.05,
     "fisher_use_gpu": None, "periodic_2pi_indices": None,
     "sigmas": None, "covariance_file": None,
+    # Sampling-vector names to pin: a list (pinned at the truth) or a mapping
+    # name -> value in sampling-vector units (ln mass for the masses).
+    "fixed": None,
 }
 INJECTION_KEYS = (
     "mass_1", "mass_2", "a", "p", "e", "x", "luminosity_distance",

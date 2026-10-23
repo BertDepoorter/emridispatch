@@ -64,11 +64,12 @@ class ImpulseBackend:
                 logger.info("impulse: fresh start requested; removing %s", path)
                 os.remove(path)
 
-        # Sampling-space view: reparam-wrapped callables, transformed start/cov.
+        # Sampling-space view: reparam-wrapped callables, transformed start/cov,
+        # fixed parameters removed.
         w = problem.wrapped()
 
         sampler = PTSampler(
-            ndim=problem.ndim, lnlike=w.lnlike, lnprior=w.lnprior,
+            ndim=w.ndim, lnlike=w.lnlike, lnprior=w.lnprior,
             sample_mean=w.x0.copy(), sample_cov=w.proposal_cov,
             ntemps=ntemps, ladder=ladder, swap_steps=1,
             inf_temp=False,  # inf chain already the top rung of ladder
@@ -81,9 +82,10 @@ class ImpulseBackend:
 
         # Adaptive mode-jump proposal(s), learning modes online from a shared
         # cross-chain pool ("none" adds none). The GMM models the (whitened)
-        # intrinsic block = the reparam indices.
+        # intrinsic block = the reparam indices (never fixed, so all free).
         mode_jumps = build_mode_jumps(
-            method, problem.ndim, dims=np.asarray(problem.reparam.idx),
+            method, w.ndim,
+            dims=np.searchsorted(w.free_idx, problem.reparam.idx),
             weight=mode_jump_weight, seed=seed)
         for jump, jw in mode_jumps:
             sampler.add_custom_jump(jump, weight=jw)

@@ -115,10 +115,13 @@ class ErynBackend:
         if ntemps < 1:
             raise ValueError(
                 f"sampler.eryn.ntemps must be at least 1 (got {ntemps})")
-        if nwalkers < 2 * problem.ndim:
+        # Sampling-space view: reparam-wrapped callables, transformed start/cov,
+        # fixed parameters removed.
+        w = problem.wrapped()
+        if nwalkers < 2 * w.ndim:
             raise ValueError(
                 f"sampler.eryn.nwalkers must be at least 2*ndim = "
-                f"{2 * problem.ndim} (got {nwalkers})")
+                f"{2 * w.ndim} (got {nwalkers})")
 
         move = str(e.move).lower()
         if move != "stretch":
@@ -132,9 +135,7 @@ class ErynBackend:
         np.random.seed(seed)
         rng = np.random.default_rng(seed)
 
-        # Sampling-space view: reparam-wrapped callables, transformed start/cov.
-        w = problem.wrapped()
-        prior = _WhitenedPrior(w.lnprior, problem.ndim)
+        prior = _WhitenedPrior(w.lnprior, w.ndim)
         priors = {"model_0": prior}
         periodic = ({"model_0": {int(i): float(p)
                                  for i, p in w.periodic.items()}}
@@ -175,7 +176,7 @@ class ErynBackend:
             initial_state = State({"model_0": coords})
 
         sampler = EnsembleSampler(
-            nwalkers, problem.ndim, w.lnlike, priors,
+            nwalkers, w.ndim, w.lnlike, priors,
             tempering_kwargs=tempering_kwargs,
             moves=None,  # default StretchMove(a=2), tempering+periodic wired
             backend=backend, vectorize=False, periodic=periodic,
