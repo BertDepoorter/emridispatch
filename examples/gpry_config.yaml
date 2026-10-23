@@ -1,0 +1,71 @@
+# Minimal GPry-backend configuration (`pip install emridispatch[gpry]`).
+# GPry is not an MCMC: it regresses the log-posterior with a Gaussian process,
+# chooses true evaluations by batch acquisition, and samples the surrogate.
+# Raw output: <outdir>/gpry_samples.npz (equal-weight surrogate draws),
+# gpry_evals.npz (every true evaluation), gpry_progress.csv (timing) and the
+# gpry_checkpoint/ directory (resume). Postprocess with
+# `emridisp-postprocess <outdir>`.
+#     emridisp gpry_config.yaml
+# Batch-parallel evaluations: install mpi4py and launch with mpirun/srun.
+
+injection:
+  mass_1: 1.0e+6   # note the +: YAML needs a signed exponent to parse as float
+  mass_2: 10.0
+  a: 0.0
+  p: 10.0
+  e: 0.1
+  x: 1.0           # fixed (equatorial model) -- not sampled
+  q_k: 1.0
+  phi_k: 1.5707963267948966
+  q_s: 1.0
+  phi_s: 1.5707963267948966
+  luminosity_distance: 1.0
+  phi_phi: 1.5707963267948966
+  phi_theta: 0.0               # fixed -- not sampled
+  phi_r: 1.5707963267948966
+
+data:
+  response: lisatools   # lisatools | toy | any registered response model
+  duration: 0.1    # years
+  delta_t: 10.0    # seconds
+  inj_snr: 30.0    # rescales distance to this SNR (null: use distance verbatim)
+  channels: [A, E]  # TDI channels (ignored when tdi: off)
+  tdi: 2nd          # off | 1st | 2nd -- off = no LISA response (direct h+
+                    # channel vs sky-averaged sensitivity); 1st/2nd pick the
+                    # TDI generation for response AND sensitivity (default 2nd)
+
+sampler:
+  backend: gpry
+  nsamples: 10000     # equal-weight posterior draws stored from the surrogate
+  gpry:
+    domain: prior     # prior: bounding box of the true prior support in the
+                      #   sampling coords (exact posterior);
+                      # fisher: whitened box |z| <= fisher_k around the start
+                      #   point (truncates the prior at fisher_k sigma)
+    fisher_k: 6.0
+    ref_scale: 3.0    # initial design within ref_scale proposal sigmas of the
+                      #   start point (null: draw from the whole box)
+    kernel: RBF       # RBF | Matern | {Matern: {nu: 1.5}}
+    max_total: null   # truth-evaluation budget (null: GPry default 70 d^1.5)
+    n_points_per_acq: null   # batch size per acquisition (null: d)
+    mc: nested        # surrogate sampler (PolyChord if installed, else UltraNest)
+    nlive: null       # null: GPry default 50 d
+
+prior:
+  fisher: manual
+  box_scale: 3.0
+  sigmas:
+    mass_1: 1.0
+    mass_2: 1.0e-4
+    a: 1.0e-5
+    p: 1.0e-6
+    e: 1.0e-6
+    luminosity_distance: 0.05
+
+reparam:
+  mode: auto       # auto | grid | "off"  (quote "off": bare off is a YAML boolean)
+  idx: [0, 1, 2, 3, 4, 5]  # input parameter array indices included in the reparam
+
+run:
+  seed: 1245
+  outdir: ./output_gpry

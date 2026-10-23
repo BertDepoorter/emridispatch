@@ -13,6 +13,7 @@ from emridispatch.backends.base import SamplerBackend, SamplingProblem  # noqa: 
 _REGISTRY = {
     "impulse": ("emridispatch.backends.impulse:ImpulseBackend", "emridispatch[impulse]"),
     "eryn": ("emridispatch.backends.eryn:ErynBackend", "emridispatch[eryn]"),
+    "gpry": ("emridispatch.backends.gpry:GPryBackend", "emridispatch[gpry]"),
 }
 
 

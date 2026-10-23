@@ -27,7 +27,8 @@ logger = logging.getLogger(__name__)
 # Packages behind each sampler backend / response (TDI) model / Fisher
 # provider, logged at run start for reproducibility (the log is archived into
 # results.h5). Entries may be import names or distribution names.
-_BACKEND_DISTS = {"impulse": ["impulse-mcmc"], "eryn": ["eryn"]}
+_BACKEND_DISTS = {"impulse": ["impulse-mcmc"], "eryn": ["eryn"],
+                  "gpry": ["gpry"]}
 _RESPONSE_DISTS = {
     "lisatools": ["lisaanalysistools", "fastemriwaveforms", "fastlisaresponse"],
     "toy": [],

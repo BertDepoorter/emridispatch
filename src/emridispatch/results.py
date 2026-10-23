@@ -1,7 +1,7 @@
 """Sampler-agnostic results: raw backend output -> common HDF5 format.
 
-Converts a backend outdir (impulse chain_N.txt; eryn eryn_chain.h5)
-into one format_version 1 results.h5. Requires h5py
+Converts a backend outdir (impulse chain_N.txt; eryn eryn_chain.h5; gpry
+gpry_samples.npz) into one format_version 1 results.h5. Requires h5py
 (pip install emridispatch[results]).
 
 lnprob is the tempered log posterior, lnprior + beta*lnlike, the density each
@@ -718,6 +718,39 @@ def _convert_eryn(run_dir):
     )
     _warn_if_ladder_adapted(results, run_dir)
     return results
+
+
+@register_converter("gpry")
+def _convert_gpry(run_dir):
+    """GPry surrogate posterior (gpry_samples.npz) as a one-rung "chain".
+
+    The draws are an equal-weight resample of GPry's final MC sample of the
+    surrogate, so rows are independent rather than Markov steps. lnlike is the
+    SURROGATE's log-likelihood at each draw, not a true evaluation; the true
+    evaluations are in gpry_evals.npz. Stored as ntemps = nwalkers = 1 with
+    beta = 1 throughout.
+    """
+    path = os.path.join(run_dir, "gpry_samples.npz")
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"{run_dir}: no gpry_samples.npz found")
+    with np.load(path) as f:
+        raw, lnlike, lnprior = f["samples"], f["lnlike"], f["lnprior"]
+
+    fixed = _load_fixed(run_dir)
+    if raw.shape[-1] != NDIM - len(fixed):
+        raise ValueError(
+            f"{path}: samples have ndim={raw.shape[-1]}, expected "
+            f"{NDIM - len(fixed)} ({NDIM} minus {len(fixed)} fixed)")
+    samples = _embed_fixed(raw, fixed)[None]
+    lnlike, lnprior = lnlike[None], lnprior[None]
+    ndraws = samples.shape[1]
+    return Results(
+        samples=samples, lnlike=lnlike, lnprior=lnprior,
+        lnprob=lnprior + lnlike, accepted=np.ones((1, ndraws)),
+        betas=np.ones((ndraws, 1)), temperatures=np.ones(1),
+        nwalkers=1, param_names=list(PARAM_NAMES), backend="gpry",
+        **_load_sidecars(run_dir, samples),
+    )
 
 
 def main():

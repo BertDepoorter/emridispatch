@@ -43,6 +43,7 @@ conda install -y -c conda-forge --override-channels cxx-compiler pkgconfig "libb
 pip install -e .                       # core only (numpy/scipy/pyyaml)
 pip install -e ".[impulse]"            # + the impulse PT-MCMC backend
 pip install -e ".[eryn]"               # + the eryn PT ensemble backend
+pip install -e ".[gpry]"               # + the GPry GP-surrogate backend
 pip install -e ".[lisatools]"          # + lisa-analysis-tools/FEW response
 pip install -e ".[fisher]"             # + StableEMRIFisher
 pip install -e ".[all]"                # everything
@@ -184,10 +185,14 @@ config.yaml -> build_problem(cfg) -> SamplingProblem -> backend.run(problem, cfg
   physical-space likelihood, a structured `JointPrior`, the reparam transform,
   start point, and proposal covariance. No sampler is imported.
 - **`emridispatch.backends`** is a sampler registry. Built in: `impulse` (PT-MCMC,
-  temperature ladder, cross-chain mode jumps; `chain_N.txt` output) and `eryn`
-  (parallel-tempered ensemble sampler, stretch move, `eryn_chain.h5` output).
-  Shared sampler knobs live at the top of the config `sampler:` section;
-  backend-specific ones in its `impulse:`/`eryn:` subsections. Other sampler backends
+  temperature ladder, cross-chain mode jumps; `chain_N.txt` output), `eryn`
+  (parallel-tempered ensemble sampler, stretch move, `eryn_chain.h5` output) and
+  `gpry` (active-learning Gaussian-process surrogate of the log-posterior,
+  sampled by nested sampling; `gpry_samples.npz` output, see
+  `examples/gpry_config.yaml`). Shared sampler knobs live at the top of the
+  config `sampler:` section; backend-specific ones in its
+  `impulse:`/`eryn:`/`gpry:` subsections. `prior.fixed` pins sampling-vector
+  rows for every backend alike. Other sampler backends
   plug in via `register_backend()` consuming the same `SamplingProblem`, where
   likelihood, TDI response, prior, and reparametrization are shared. MCMC backends opt into the whitened coordinates
   via `problem.wrapped()`; nested-sampler backends can use the structured

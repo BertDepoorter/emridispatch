@@ -86,6 +86,12 @@ ERYN_DEFAULTS = {
     "adaptation_time": 100, "stop_adaptation": -1, "burn": 0,
     "thin_by": 1, "progress": False, "start_spread": 1.0, "move": "stretch",
 }
+GPRY_DEFAULTS = {
+    "domain": "prior", "fisher_k": 6.0, "ref_scale": 3.0, "kernel": "RBF",
+    "n_initial": None, "max_initial": None, "max_total": None,
+    "n_points_per_acq": None, "mc": "nested", "nlive": None,
+    "prior_draws": 10000, "plots": False, "verbose": 3,
+}
 PRIOR_DEFAULTS = {
     "box_scale": 3.0, "fisher": "auto", "angle_sigma": 0.05,
     "fisher_use_gpu": None, "periodic_2pi_indices": None,
@@ -150,7 +156,8 @@ def load_config(path):
 
     Sections: injection (dict) plus .data/.sampler/.prior/.priors/
     .reparam/.run/.logging/.pp. Sampler knobs nest under .sampler.impulse
-    (.ladder/.mode_jump) and .sampler.eryn, each with merged-in defaults.
+    (.ladder/.mode_jump), .sampler.eryn and .sampler.gpry, each with
+    merged-in defaults.
     """
     with open(path) as fh:
         raw = yaml.safe_load(fh)
@@ -182,6 +189,7 @@ def load_config(path):
     raw_sampler = dict(raw.get("sampler") or {})
     raw_impulse = dict(raw_sampler.pop("impulse", None) or {})
     raw_eryn = raw_sampler.pop("eryn", None) or {}
+    raw_gpry = raw_sampler.pop("gpry", None) or {}
     raw_ladder = raw_impulse.get("ladder") or {}
     raw_mode_jump = raw_impulse.get("mode_jump") or {}
 
@@ -192,6 +200,7 @@ def load_config(path):
     _check_keys("sampler.impulse.ladder", raw_ladder, LADDER_DEFAULTS)
     _check_keys("sampler.impulse.mode_jump", raw_mode_jump, MODE_JUMP_DEFAULTS)
     _check_keys("sampler.eryn", raw_eryn, ERYN_DEFAULTS)
+    _check_keys("sampler.gpry", raw_gpry, GPRY_DEFAULTS)
     _check_keys("prior", raw.get("prior"), PRIOR_DEFAULTS)
     _check_keys("reparam", raw.get("reparam"), REPARAM_KEYS)
     _check_keys("run", raw.get("run"), RUN_KEYS)
@@ -207,7 +216,8 @@ def load_config(path):
              if k not in ("ladder", "mode_jump")},
             ladder=_merge_ns(LADDER_DEFAULTS, raw_ladder),
             mode_jump=_merge_ns(MODE_JUMP_DEFAULTS, raw_mode_jump)),
-        eryn=_merge_ns(ERYN_DEFAULTS, raw_eryn))
+        eryn=_merge_ns(ERYN_DEFAULTS, raw_eryn),
+        gpry=_merge_ns(GPRY_DEFAULTS, raw_gpry))
 
     sampler.nsamples = _as_nsamples("sampler.nsamples", sampler.nsamples)
 

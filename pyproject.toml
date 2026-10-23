@@ -20,6 +20,7 @@ dependencies = [
 # Sampler backends (each backend is an extra; core is sampler-free).
 impulse = ["impulse-mcmc"]
 eryn = ["eryn"]
+gpry = ["gpry>=4.1"]
 # TDI / waveform / PSD response via lisa-analysis-tools + FastEMRIWaveforms.
 lisatools = [
     "lisaanalysistools @ git+https://github.com/thompsonphys/lisa-analysis-tools.git@dev",
@@ -38,7 +39,7 @@ results = ["h5py"]
 # Corner / 1D posterior plots from results files (emridispatch-plot).
 viz = ["h5py", "corner", "matplotlib"]
 dev = ["pytest"]
-all = ["emridispatch[impulse,eryn,lisatools,fisher,gmm,diagnostics,results,viz,dev]"]
+all = ["emridispatch[impulse,eryn,gpry,lisatools,fisher,gmm,diagnostics,results,viz,dev]"]
 
 [project.scripts]
 emridisp = "emridispatch.cli:main"
