@@ -289,7 +289,7 @@ class GPryBackend:
         # Every rank evaluated part of each batch; collect on the main rank.
         all_recs = mpi.gather(target.records())
         if not mpi.is_main_process:
-            return None
+            return {"mpi_rank": mpi.RANK}   # not None: the CLI reads that as failure
         rec = {k: np.concatenate([r[k] for r in all_recs]) for k in all_recs[0]}
         u_eval = boxmap.to_u(rec["z"])
         evals = _append_evals(
