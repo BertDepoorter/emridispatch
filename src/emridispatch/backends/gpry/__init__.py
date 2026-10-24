@@ -12,7 +12,9 @@ problem.wrapped() is mapped affinely to a box coordinate z, u = u0 + L z
   prior   L = 1, u0 = 0. Box = bounding box of the prior support in u, with the
           true lnprior folded into the likelihood (-inf outside the support,
           learned by GPry's infinities classifier). Same posterior as every
-          other backend.
+          other backend, but u is rotated, not rescaled: on a strongly
+          correlated posterior (a real EMRI) it is a thin slab in the box and
+          acquisition stalls. Only for near-uncorrelated problems.
   fisher  L L^T = proposal covariance in u (Fisher for the intrinsics, the
           angle_sigma heuristic for the angles), u0 = start point. Box =
           |z_i| <= fisher_k, clipped to the support's bounding box. This

@@ -38,10 +38,13 @@ sampler:
   backend: gpry
   nsamples: 10000     # equal-weight posterior draws stored from the surrogate
   gpry:
-    domain: prior     # prior: bounding box of the true prior support in the
-                      #   sampling coords (exact posterior);
-                      # fisher: whitened box |z| <= fisher_k around the start
-                      #   point (truncates the prior at fisher_k sigma)
+    domain: fisher    # fisher: whitened box |z| <= fisher_k around the start
+                      #   point (truncates the prior at fisher_k sigma; angles
+                      #   at fisher_k * prior.angle_sigma). Use this for EMRIs.
+                      # prior: bounding box of the true prior support in the
+                      #   rotated sampling coords (exact posterior), but GPry
+                      #   stalls when the posterior is strongly correlated:
+                      #   only for near-uncorrelated problems such as the toy.
     fisher_k: 6.0
     ref_scale: 3.0    # initial design within ref_scale proposal sigmas of the
                       #   start point (null: draw from the whole box)
