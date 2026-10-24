@@ -11,7 +11,7 @@ import numpy as np
 from emridispatch.fisher import FisherResult
 from emridispatch.noise import (
     MIN_FREQ, channel_noise_psd, per_channel_noise_kwargs, sensitivity_spec)
-from emridispatch.parameters import FEW_TO_INJECTION, few_params
+from emridispatch.parameters import FEW_TO_INJECTION, INTRINSIC_ORDER, few_params
 
 logger = logging.getLogger(__name__)
 
@@ -47,22 +47,31 @@ class _SharedWaveform:
 class SEFFisherProvider:
     name = "sef"
 
-    def __init__(self, tdi="2nd generation", foreground=True, channels=None):
+    def __init__(self, tdi="2nd generation", foreground=True, channels=None,
+                 full=False):
         self.tdi = tdi
         self.foreground = foreground
         self.channels = channels
+        self.full = full
 
     def compute(self, injection_parameters, *, duration, delta_t, use_gpu=None):
         sigmas, cov, order = get_parameter_precision(
             injection_parameters, duration=duration, delta_t=delta_t,
             use_gpu=use_gpu, tdi=self.tdi, foreground=self.foreground,
-            channels=self.channels)
-        return FisherResult(sigmas=sigmas, cov=cov, order=order)
+            channels=self.channels, full=self.full)
+        if not self.full:
+            return FisherResult(sigmas=sigmas, cov=cov, order=order)
+        k = len(INTRINSIC_ORDER)
+        return FisherResult(sigmas=sigmas, cov=cov[:k, :k], order=order[:k],
+                            cov_full=cov)
 
 
 def get_parameter_precision(input_parameters, duration, delta_t,
                             use_gpu=None, tdi="2nd generation",
-                            foreground=True, channels=None):
+                            foreground=True, channels=None, full=False):
+    """(sigmas, cov, order) from SEF. full=False differentiates the six
+    intrinsic parameters only (angles and phases held at the injection);
+    full=True all twelve sampled ones, so cov is marginal over the angles."""
     if use_gpu is None:
         use_gpu = _gpu_available()
     force_backend = None if use_gpu else "cpu"
@@ -153,6 +162,10 @@ def get_parameter_precision(input_parameters, duration, delta_t,
     )
 
     param_names = ["m1", "m2", "a", "p0", "e0", "dist"]
+    if full:
+        # Same order as the sampling vector rows 6..11; SEF picks the angle and
+        # phase steps itself (relative grid 1e-1..1e-6 of the value).
+        param_names += ["qS", "phiS", "qK", "phiK", "Phi_phi0", "Phi_r0"]
 
     delta_range = dict(
         m1=np.geomspace(1e3, 1e-5, Ndelta),
@@ -172,6 +185,8 @@ def get_parameter_precision(input_parameters, duration, delta_t,
 
     param_cov = np.linalg.inv(fisher_matrix)
     param_cov = 0.5 * (param_cov + param_cov.T)
+    logger.info("fisher: %d params, cond(Gamma) = %.3g", len(param_names),
+                np.linalg.cond(fisher_matrix))
 
     order = [FEW_TO_INJECTION[k] for k in param_names]
     sigmas = {name: param_cov[i, i] ** (1 / 2) for i, name in enumerate(order)}

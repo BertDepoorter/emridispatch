@@ -11,13 +11,16 @@ heuristic. Providers implement
 
 carrying diagonal 1-sigma errors and the 6x6 intrinsic covariance in
 linear coords, ordered [mass_1, mass_2, a, p, e, luminosity_distance].
+With prior.fisher_full (sef only) the Fisher matrix spans all 12 sampled
+parameters; cov is then the intrinsic block of its inverse (marginal over
+the angles and phases) and cov_full the whole inverse.
 """
 
 from dataclasses import dataclass
 
 import numpy as np
 
-from emridispatch.parameters import INTRINSIC_ORDER
+from emridispatch.parameters import INTRINSIC_ORDER, NDIM
 
 __all__ = ["FisherResult", "get_fisher_provider"]
 
@@ -29,9 +32,16 @@ class FisherResult:
     sigmas: dict          # injection-parameter name -> 1-sigma error
     cov: np.ndarray       # (6, 6) covariance, linear coords
     order: list           # ["mass_1", "mass_2", "a", "p", "e", "luminosity_distance"]
+    # (12, 12) covariance over the sampling-vector rows (masses linear), or None
+    cov_full: np.ndarray = None
 
     def __post_init__(self):
         self.cov = np.asarray(self.cov, dtype=float)
+        if self.cov_full is not None:
+            self.cov_full = np.asarray(self.cov_full, dtype=float)
+            if self.cov_full.shape != (NDIM, NDIM):
+                raise ValueError(f"FisherResult cov_full must be ({NDIM}, {NDIM}), "
+                                 f"got {self.cov_full.shape}")
         if list(self.order) != INTRINSIC_ORDER:
             raise ValueError(
                 f"FisherResult order must be {INTRINSIC_ORDER}, got {self.order}")
@@ -54,6 +64,7 @@ def get_fisher_provider(cfg):
     from emridispatch.fisher import manual as _manual
 
     kind = str(getattr(cfg.prior, "fisher", "auto")).lower()
+    full = bool(getattr(cfg.prior, "fisher_full", False))
     has_manual_cfg = (getattr(cfg.prior, "sigmas", None) is not None
                       or getattr(cfg.prior, "covariance_file", None) is not None)
 
@@ -73,7 +84,10 @@ def get_fisher_provider(cfg):
         return SEFFisherProvider(
             tdi=str(getattr(data, "tdi", "2nd generation")),
             foreground=bool(getattr(data, "foreground", True)),
-            channels=None if _channels is None else list(_channels))
+            channels=None if _channels is None else list(_channels),
+            full=full)
+    if full:
+        raise ValueError(f"prior.fisher_full needs the 'sef' provider, not {kind!r}")
     if kind == "manual":
         return _manual.ManualFisherProvider.from_config(cfg)
     if kind == "none":
