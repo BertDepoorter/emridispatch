@@ -272,6 +272,10 @@ class GPryBackend:
                                    np.minimum(zc + half, bounds[:, 1])])
             ref_bounds = [list(r) for r in ref]
 
+        # The lisatools model swallows waveform exceptions as -inf; log the
+        # first of each kind so a failing region is not mistaken for the prior.
+        if hasattr(problem.lnlike, "log_lnlike_failures"):
+            problem.lnlike.log_lnlike_failures = True
         target = Target(w.lnlike, w.lnprior, boxmap)
         names = [problem.param_names[i] for i in w.free_idx]
         options = {key: (int(getattr(g, key)) if getattr(g, key) is not None else None)
@@ -344,6 +348,9 @@ class GPryBackend:
             "n_truth_calls": int(len(evals["lnlike"])),
             "n_likelihood_evals": int(np.sum(np.isfinite(evals["lnprior"]))),
             "n_finite": int(finite.sum()),
+            # inside the prior but lnL = -inf: waveform/likelihood failures
+            "n_likelihood_failed": int(np.sum(np.isfinite(evals["lnprior"]) & ~finite)),
+            "lnlike_failures": dict(getattr(problem.lnlike, "lnlike_failures", {}) or {}),
             "lnlike_max": float(np.max(evals["lnlike"][finite])) if finite.any() else None,
             "seconds_likelihood": float(np.sum(evals["seconds"])),
             "seconds_wall": wall,
