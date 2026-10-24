@@ -131,6 +131,11 @@ def support_box(problem, w, boxmap, n_draws, rng):
     return np.column_stack([lo, hi])
 
 
+def _detached(u):
+    raise RuntimeError("Target restored from a GPry checkpoint has no "
+                       "likelihood; pass the live one to Runner on resume")
+
+
 class Target:
     """GPry log-likelihood in box coords: true lnlike + lnprior at u(z).
 
@@ -160,6 +165,16 @@ class Target:
         self.lnp.append(lp)
         self.seconds.append(time.perf_counter() - t0 if np.isfinite(lp) else 0.0)
         return ll + lp if np.isfinite(lp) else -np.inf
+
+    def __getstate__(self):
+        """GPry pickles its likelihood into every checkpoint, but on resume it
+        uses the Target passed to Runner (this backend always passes one). The
+        likelihood can hold unpicklable GPU objects, so only the box map is
+        stored; an unpickled Target refuses to evaluate."""
+        return {"boxmap": self.boxmap}
+
+    def __setstate__(self, state):
+        self.__init__(_detached, _detached, state["boxmap"])
 
     def records(self):
         d = len(self.boxmap.u0)
