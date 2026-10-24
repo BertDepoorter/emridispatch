@@ -143,3 +143,67 @@ def test_gpry_backend_end_to_end(toy_cfg, domain):
     # Toy posterior: N(truth, sigma), sigma = 0.05 * max(|truth|, 1) for a, e.
     for i in (2, 4):
         assert abs(x[:, i].mean() - problem.truth[i]) < 0.02
+
+
+class _OrbitsWrapGPU:
+    """Mimics lisatools' C++ GPU orbit wrapper: neither pickle nor dill can
+    serialise it."""
+
+    def __reduce__(self):
+        raise TypeError("cannot pickle 'OrbitsWrapGPU' object")
+
+
+class _GPUBoundLikelihood:
+    """Stands in for the lisatools model: evaluates fine, cannot be pickled."""
+
+    def __init__(self, inner):
+        self.inner = inner
+        self.orbits = _OrbitsWrapGPU()
+
+    def __call__(self, x):
+        return self.inner(x)
+
+
+def _minus_one(u):
+    return -1.0
+
+
+def _zero(u):
+    return 0.0
+
+
+def test_target_pickles_without_likelihood():
+    import pickle
+
+    t = Target(_GPUBoundLikelihood(_minus_one), _zero, BoxMap.identity(2))
+    assert t(np.zeros(2)) == -1.0
+    restored = pickle.loads(pickle.dumps(t))
+    assert np.allclose(restored.boxmap.u0, t.boxmap.u0)
+    with pytest.raises(RuntimeError, match="no likelihood"):
+        restored(np.zeros(2))
+
+
+def test_gpry_backend_checkpoint_and_resume_unpicklable_likelihood(toy_cfg):
+    pytest.importorskip("gpry")
+    from emridispatch.backends import get_backend
+
+    toy_cfg.prior.fixed = [n for n in PARAM_NAMES if n not in ("a", "e")]
+    toy_cfg.reparam.idx = [2, 4]
+    toy_cfg.prior.fisher = "manual"
+    toy_cfg.prior.sigmas = {"mass_1": 1.0e4, "mass_2": 1.0e-2, "a": 0.05,
+                            "p": 0.1, "e": 0.05, "luminosity_distance": 0.05}
+    toy_cfg.prior.box_scale = 5.0
+    toy_cfg.sampler.backend = "gpry"
+    toy_cfg.sampler.nsamples = 200
+    toy_cfg.sampler.gpry.max_total = 40
+    toy_cfg.sampler.gpry.nlive = 50
+    toy_cfg.sampler.gpry.verbose = 1
+    problem = build_problem(toy_cfg)
+    problem.lnlike = _GPUBoundLikelihood(problem.lnlike)
+
+    backend = get_backend("gpry")
+    first = backend.run(problem, toy_cfg, resume=False)
+    assert os.path.isdir(os.path.join(problem.outdir, "gpry_checkpoint"))
+    # Resume from the checkpoint with the live likelihood, as a resubmitted job does.
+    second = backend.run(problem, toy_cfg, resume=True)
+    assert second["n_truth_calls"] >= first["n_truth_calls"]
