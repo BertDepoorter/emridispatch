@@ -104,7 +104,8 @@ def ensure_reference_cache(cfg, outroot):
     mins, maxes, sample_cov, reparam = build_prior_bounds(
         fisher.sigmas, fisher.cov, fisher.order, model.injection_parameters,
         truth_vec, cfg.reparam.mode, np.array(cfg.reparam.idx),
-        cfg.prior.angle_sigma, NDIM, box_scale=box_scale)
+        cfg.prior.angle_sigma, NDIM, box_scale=box_scale,
+        cov_full=fisher.cov_full)
     save_prior_bounds(ref_cache, mins, maxes, sample_cov, reparam,
                       box_scale=box_scale, prec_dict=fisher.sigmas,
                       injection_parameters=model.injection_parameters,

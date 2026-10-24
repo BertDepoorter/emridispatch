@@ -80,8 +80,13 @@ def box_ingredients(prec_dict, injection_parameters):
 
 def build_prior_bounds(prec_dict, cov_lin, cov_order, injection_parameters,
                        truth_vec, reparam_mode, reparam_idx, angle_sigma, ndim,
-                       box_scale=DEFAULT_BOX_SCALE):
-    """First-run build. Returns (mins, maxes, sample_cov, reparam)."""
+                       box_scale=DEFAULT_BOX_SCALE, cov_full=None):
+    """First-run build. Returns (mins, maxes, sample_cov, reparam).
+
+    cov_full, the (ndim, ndim) inverse of a Fisher matrix over every sampled
+    parameter (masses linear), replaces the intrinsic block + angle_sigma
+    diagonal as the proposal covariance; the box still comes from prec_dict.
+    """
     center, sigmas = box_ingredients(prec_dict, injection_parameters)
     mins, maxes = _box_from_ingredients(center, sigmas, box_scale)
 
@@ -95,9 +100,16 @@ def build_prior_bounds(prec_dict, cov_lin, cov_order, injection_parameters,
     jac[1] = 1.0 / injection_parameters["mass_2"]
     cov_intrinsic = np.asarray(cov_lin) * np.outer(jac, jac)
 
-    sample_cov = np.zeros((ndim, ndim))
-    sample_cov[:6, :6] = cov_intrinsic
-    sample_cov[6:, 6:] = np.diag(np.full(ndim - 6, angle_sigma ** 2))
+    if cov_full is None:
+        sample_cov = np.zeros((ndim, ndim))
+        sample_cov[:6, :6] = cov_intrinsic
+        sample_cov[6:, 6:] = np.diag(np.full(ndim - 6, angle_sigma ** 2))
+    else:
+        jac_full = np.ones(ndim)
+        jac_full[:6] = jac
+        sample_cov = np.asarray(cov_full, dtype=float) * np.outer(jac_full, jac_full)
+        if not np.allclose(sample_cov[:6, :6], cov_intrinsic, rtol=1e-10, atol=0):
+            raise ValueError("cov_full's intrinsic block differs from cov_lin")
 
     reparam = _build_reparam(reparam_mode, ndim, reparam_idx, cov_intrinsic, truth_vec)
     return mins, maxes, sample_cov, reparam

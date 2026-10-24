@@ -158,7 +158,8 @@ def fisher_key_from_config(cfg):
         bool(cfg.data.foreground),
         cfg.data.duration, cfg.data.delta_t,
         None if channels is None else list(channels),
-    ) + f"|provider={get_fisher_provider(cfg).name}"
+    ) + f"|provider={get_fisher_provider(cfg).name}" + (
+        "|full" if getattr(cfg.prior, "fisher_full", False) else "")
 
 
 def build_problem(cfg, resume=True):
@@ -206,7 +207,8 @@ def build_problem(cfg, resume=True):
         mins, maxes, sample_cov, reparam = build_prior_bounds(
             fisher.sigmas, fisher.cov, fisher.order,
             model.injection_parameters, truth_vec,
-            reparam_mode, reparam_idx, angle_sigma, ndim, box_scale=box_scale)
+            reparam_mode, reparam_idx, angle_sigma, ndim, box_scale=box_scale,
+            cov_full=fisher.cov_full)
         save_prior_bounds(bounds_cache, mins, maxes, sample_cov, reparam,
                           box_scale=box_scale, prec_dict=fisher.sigmas,
                           injection_parameters=model.injection_parameters,

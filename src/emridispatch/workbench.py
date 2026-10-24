@@ -346,5 +346,5 @@ def _box_from_config(cfg, reparam_idx, box_scale, allow_fisher, model=None):
     mins, maxes, _cov, _reparam = build_prior_bounds(
         fisher.sigmas, fisher.cov, fisher.order, injection_parameters,
         truth_vec, cfg.reparam.mode, reparam_idx, cfg.prior.angle_sigma, NDIM,
-        box_scale=box_scale)
+        box_scale=box_scale, cov_full=fisher.cov_full)
     return mins, maxes
