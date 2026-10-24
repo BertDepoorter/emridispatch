@@ -16,7 +16,8 @@ problem.wrapped() is mapped affinely to a box coordinate z, u = u0 + L z
           correlated posterior (a real EMRI) it is a thin slab in the box and
           acquisition stalls. Only for near-uncorrelated problems.
   fisher  L L^T = proposal covariance in u (Fisher for the intrinsics, the
-          angle_sigma heuristic for the angles), u0 = start point. Box =
+          angle_sigma heuristic for the angles; the 12x12 Fisher for all of
+          them with prior.fisher_full), u0 = start point. Box =
           |z_i| <= fisher_k, clipped to the support's bounding box. This
           TRUNCATES the prior at fisher_k proposal sigmas: posterior mass
           outside is lost by construction.
