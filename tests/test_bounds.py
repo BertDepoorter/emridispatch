@@ -176,3 +176,29 @@ def test_manual_provider_config_errors():
     incomplete = {k: v for k, v in PREC.items() if k != "e"}
     with pytest.raises(ValueError, match="missing"):
         get_fisher_provider(_manual_cfg(sigmas=incomplete))
+
+
+def test_full_fisher_covariance_is_the_proposal():
+    # A correlated 12x12 covariance (masses linear): the proposal is it, with the
+    # log-mass Jacobian on rows/cols 0, 1, and no angle_sigma diagonal.
+    sig = np.array([PREC[p] for p in INTRINSIC_ORDER] + [0.02, 0.03, 0.2, 0.3, 0.01, 0.04])
+    corr = np.full((NDIM, NDIM), 0.3) + 0.7 * np.eye(NDIM)
+    cov_full = corr * np.outer(sig, sig)
+    mins, maxes, sample_cov, reparam = build_prior_bounds(
+        PREC, cov_full[:6, :6], list(INTRINSIC_ORDER), INJ, TRUTH, "auto", IDX,
+        angle_sigma=0.05, ndim=NDIM, box_scale=3.0, cov_full=cov_full)
+    jac = np.ones(NDIM)
+    jac[:2] = [1 / INJ["mass_1"], 1 / INJ["mass_2"]]
+    np.testing.assert_allclose(sample_cov, cov_full * np.outer(jac, jac))
+    # The box still comes from the intrinsic sigmas; angles keep full ranges.
+    ref_mins, ref_maxes, _, _ = _build()
+    np.testing.assert_array_equal(mins, ref_mins)
+    np.testing.assert_array_equal(maxes, ref_maxes)
+
+
+def test_full_fisher_rejects_inconsistent_intrinsic_block():
+    cov_full = np.diag([PREC[p] ** 2 for p in INTRINSIC_ORDER] + [0.01] * 6)
+    with pytest.raises(ValueError, match="intrinsic block"):
+        build_prior_bounds(PREC, 4 * cov_full[:6, :6], list(INTRINSIC_ORDER), INJ,
+                           TRUTH, "auto", IDX, angle_sigma=0.05, ndim=NDIM,
+                           cov_full=cov_full)

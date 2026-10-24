@@ -16,7 +16,8 @@ INJ = {
 
 def _fake_gpp_factory(seen):
     def fake_gpp(params, *, duration, delta_t, use_gpu=None,
-                 tdi="2nd generation", foreground=True, channels=None):
+                 tdi="2nd generation", foreground=True, channels=None,
+                 full=False):
         seen["tdi"] = tdi
         seen["foreground"] = foreground
         seen["channels"] = channels
@@ -114,7 +115,7 @@ class _Recorder:
 
     def __call__(self, *args, **kwargs):
         type(self).called = kwargs
-        return np.eye(6)
+        return np.eye(len(kwargs["param_names"]))
 
 
 @pytest.fixture
@@ -216,3 +217,46 @@ def test_wiring_tdi_default_channels(recorded_sef):
     assert seen["channels"] == ["A", "E"]
     assert seen["ResponseWrapper_kwargs"]["tdi_chan"] == "AE"
     assert len(seen["noise_kwargs"]) == 2
+
+
+def test_full_fisher_differentiates_every_sampled_parameter(recorded_sef):
+    from emridispatch.parameters import (
+        FEW_TO_INJECTION, PARAM_NAMES, VECTOR_TO_PHYSICAL)
+
+    sigmas, cov, order = sef_mod.get_parameter_precision(
+        INJ, duration=0.3, delta_t=10.0, use_gpu=False, tdi="off", full=True)
+    # Row i of the covariance is sampling-vector row i (masses linear).
+    assert ([FEW_TO_INJECTION[k] for k in _Recorder.called["param_names"]]
+            == [VECTOR_TO_PHYSICAL[n] for n in PARAM_NAMES])
+    assert order == [VECTOR_TO_PHYSICAL[n] for n in PARAM_NAMES]
+    assert cov.shape == (12, 12) and set(order) <= set(sigmas)
+
+
+def test_full_provider_splits_intrinsic_block(monkeypatch):
+    from emridispatch.parameters import INTRINSIC_ORDER, PARAM_NAMES, VECTOR_TO_PHYSICAL
+
+    order = [VECTOR_TO_PHYSICAL[n] for n in PARAM_NAMES]
+    cov = np.diag(np.arange(1.0, 13.0))
+    seen = {}
+
+    def fake_gpp(params, *, full=False, **kwargs):
+        seen["full"] = full
+        return dict(zip(order, np.sqrt(np.diag(cov)))), cov, order
+
+    monkeypatch.setattr(sef_mod, "get_parameter_precision", fake_gpp)
+    res = SEFFisherProvider(tdi="off", full=True).compute({}, duration=0.3, delta_t=10.0)
+    assert seen["full"] is True
+    assert res.order == INTRINSIC_ORDER
+    np.testing.assert_array_equal(res.cov, cov[:6, :6])
+    np.testing.assert_array_equal(res.cov_full, cov)
+
+
+def test_fisher_full_needs_sef(monkeypatch):
+    import emridispatch.fisher as fisher_mod
+
+    cfg = SimpleNamespace(
+        prior=SimpleNamespace(fisher="manual", fisher_full=True,
+                              sigmas={"mass_1": 1.0}, covariance_file=None),
+        data=SimpleNamespace(tdi="off"))
+    with pytest.raises(ValueError, match="fisher_full"):
+        fisher_mod.get_fisher_provider(cfg)
