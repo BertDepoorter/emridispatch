@@ -20,9 +20,10 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from emridispatch.noise import PSD_NOTCH, PSD_NOTCH_DEPTH
 from emridispatch.parameters import INTRINSIC_ORDER, NDIM
 
-__all__ = ["FisherResult", "get_fisher_provider"]
+__all__ = ["FisherResult", "check_snr", "get_fisher_provider"]
 
 
 @dataclass
@@ -34,6 +35,7 @@ class FisherResult:
     order: list           # ["mass_1", "mass_2", "a", "p", "e", "luminosity_distance"]
     # (12, 12) covariance over the sampling-vector rows (masses linear), or None
     cov_full: np.ndarray = None
+    snr: float = None     # optimal SNR under the provider's own inner product
 
     def __post_init__(self):
         self.cov = np.asarray(self.cov, dtype=float)
@@ -85,7 +87,9 @@ def get_fisher_provider(cfg):
             tdi=str(getattr(data, "tdi", "2nd generation")),
             foreground=bool(getattr(data, "foreground", True)),
             channels=None if _channels is None else list(_channels),
-            full=full)
+            full=full,
+            notch=float(getattr(data, "psd_notch", PSD_NOTCH)),
+            notch_depth=float(getattr(data, "psd_notch_depth", PSD_NOTCH_DEPTH)))
     if full:
         raise ValueError(f"prior.fisher_full needs the 'sef' provider, not {kind!r}")
     if kind == "manual":
@@ -95,3 +99,15 @@ def get_fisher_provider(cfg):
     raise ValueError(
         f"unknown prior.fisher setting {kind!r} "
         "(auto | sef | manual | none)")
+
+
+def check_snr(fisher, snr, rtol=0.1):
+    """Raise if the provider's SNR differs from the likelihood's by > rtol:
+    its Fisher would then describe a different inner product (Gamma ~ SNR^2)."""
+    if fisher.snr is None:
+        return
+    if not abs(fisher.snr / snr - 1.0) <= rtol:
+        raise ValueError(
+            f"Fisher provider SNR {fisher.snr:.6g} != likelihood SNR {snr:.6g}: "
+            "the two inner products differ (PSD, notch, band or response), so "
+            "the Fisher box does not describe this likelihood")
