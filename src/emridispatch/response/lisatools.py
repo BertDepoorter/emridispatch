@@ -11,7 +11,8 @@ import numpy as np
 from scipy.fft import next_fast_len
 
 from emridispatch.noise import (
-    MIN_FREQ, load_sensitivity_table, noise_sens_kwargs, sensitivity_spec)
+    MIN_FREQ, PSD_NOTCH, PSD_NOTCH_DEPTH, load_sensitivity_table,
+    noise_sens_kwargs, psd_null_mask, sensitivity_spec)
 from emridispatch.parameters import few_params, physical_from_vector
 from emridispatch.response import InjectionModel
 
@@ -110,8 +111,8 @@ class EMRIInjectionGenerator:
         add_noise=False,
         noise_seed=0,
         pad_fft=True,
-        psd_notch=1e-5,
-        psd_notch_depth=2.0,
+        psd_notch=PSD_NOTCH,
+        psd_notch_depth=PSD_NOTCH_DEPTH,
         psd_notch_strict=True,
     ):
         self._lt = _import_lisatools()
@@ -184,41 +185,16 @@ class EMRIInjectionGenerator:
 
     def _psd_null_mask(self, f_arr, sens_mat, block=4096, _width=None):
         width = self.psd_notch if _width is None else _width
-        if width <= 0.0:
-            return None
-        f = np.asarray(f_arr.get() if hasattr(f_arr, "get") else f_arr)
-        S = np.asarray(sens_mat.get() if hasattr(sens_mat, "get") else sens_mat)
-        S = S.reshape(-1, S.shape[-1])
-        nf = S.shape[-1]
-        nblk = int(np.ceil(nf / block))
-        pad = nblk * block - nf
-        bad = np.zeros(nf, dtype=bool)
-        with np.errstate(all="ignore"):
-            for row in S:
-                v = np.log10(np.where(np.isfinite(row) & (row > 0), row, np.nan))
-                vp = np.concatenate([v, np.full(pad, np.nan)]).reshape(nblk, block)
-                med = np.nanmedian(vp, axis=1)[:, None]
-                bad |= (vp < med - self.psd_notch_depth).reshape(-1)[:nf]
-        if not bad.any():
-            return None
-        idx = np.flatnonzero(bad)
-        groups = [g for g in np.split(idx, np.flatnonzero(np.diff(idx) > 1) + 1)
-                  if g[0] != 0]
-        if not groups:
-            return None
-        mask = np.zeros(nf, dtype=bool)
-        for g in groups:
-            a = np.searchsorted(f, f[g[0]] - width, side="left")
-            b = np.searchsorted(f, f[g[-1]] + width, side="right")
-            mask[a:b] = True
-        if _width is None:
-            shown = ", ".join(f"{f[g].mean():.6g}" for g in groups[:4])
-            if len(groups) > 4:
-                shown += f", ... (+{len(groups) - 4} more)"
+        mask, centres = psd_null_mask(f_arr, sens_mat, width,
+                                      self.psd_notch_depth, block)
+        if mask is not None and _width is None:
+            shown = ", ".join(f"{c:.6g}" for c in centres[:4])
+            if len(centres) > 4:
+                shown += f", ... (+{len(centres) - 4} more)"
             logger.info(
                 "psd notch: %d null(s) at %s Hz -> %d/%d bins masked "
                 "(half-width %g Hz, depth %g decades)",
-                len(groups), shown, int(mask.sum()), nf, width,
+                len(centres), shown, int(mask.sum()), mask.size, width,
                 self.psd_notch_depth)
         return mask
 

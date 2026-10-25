@@ -15,7 +15,7 @@ from emridispatch.backends.base import SamplingProblem
 from emridispatch.bounds import (
     build_prior_bounds, cache_path, fisher_cache_key, load_prior_bounds,
     save_prior_bounds)
-from emridispatch.fisher import get_fisher_provider
+from emridispatch.fisher import check_snr, get_fisher_provider
 from emridispatch.parameters import NDIM, PARAM_NAMES, truth_vector
 from emridispatch.priors import joint_prior_from_config
 from emridispatch.response import build_injection_model
@@ -158,8 +158,18 @@ def fisher_key_from_config(cfg):
         bool(cfg.data.foreground),
         cfg.data.duration, cfg.data.delta_t,
         None if channels is None else list(channels),
-    ) + f"|provider={get_fisher_provider(cfg).name}" + (
-        "|full" if getattr(cfg.prior, "fisher_full", False) else "")
+    ) + _provider_key(get_fisher_provider(cfg))
+
+
+def _provider_key(provider):
+    # SEF caches built before the PSD notch reached the Fisher carry no notch
+    # entry, so they no longer match and are rebuilt.
+    key = f"|provider={provider.name}"
+    if provider.name == "sef":
+        key += f"|notch={provider.notch:g},{provider.notch_depth:g}"
+        if provider.full:
+            key += "|full"
+    return key
 
 
 def build_problem(cfg, resume=True):
@@ -204,6 +214,7 @@ def build_problem(cfg, resume=True):
             model.injection_parameters,
             duration=cfg.data.duration, delta_t=cfg.data.delta_t,
             use_gpu=cfg.prior.fisher_use_gpu)
+        check_snr(fisher, model.optimal_snr)
         mins, maxes, sample_cov, reparam = build_prior_bounds(
             fisher.sigmas, fisher.cov, fisher.order,
             model.injection_parameters, truth_vec,
@@ -216,6 +227,14 @@ def build_problem(cfg, resume=True):
         logger.info("first run: computed prior bounds + proposal via %r "
                     "(box_scale=%g), cached to %s",
                     provider.name, box_scale, bounds_cache)
+
+    # A NaN box (non-PD Fisher) or a cache built for another injection.
+    if not np.all((truth_vec >= mins) & (truth_vec <= maxes)):
+        bad = [n for n, t, lo, hi in zip(PARAM_NAMES, truth_vec, mins, maxes)
+               if not lo <= t <= hi]
+        raise ValueError(
+            f"injection outside the prior box (or box not finite) for {bad}; "
+            f"if {bounds_cache} was built for another injection, delete it")
 
     # Structured joint prior: Uniform/PeriodicUniform box by default, then
     # per-parameter overrides from the config `priors:` section.
