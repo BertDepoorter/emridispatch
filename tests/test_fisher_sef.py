@@ -17,13 +17,13 @@ INJ = {
 def _fake_gpp_factory(seen):
     def fake_gpp(params, *, duration, delta_t, use_gpu=None,
                  tdi="2nd generation", foreground=True, channels=None,
-                 full=False):
+                 full=False, notch=0.0, notch_depth=2.0):
         seen["tdi"] = tdi
         seen["foreground"] = foreground
         seen["channels"] = channels
         sig = dict.fromkeys(
             ["mass_1", "mass_2", "a", "p", "e", "luminosity_distance"], 1.0)
-        return sig, np.eye(6), list(sig)
+        return sig, np.eye(6), list(sig), 30.0
 
     return fake_gpp
 
@@ -201,7 +201,7 @@ def test_covariance_is_exactly_symmetric(monkeypatch):
             return gamma
 
     monkeypatch.setattr(stableemrifisher, "StableEMRIFisher", _FixedFisher)
-    sigmas, cov, order = sef_mod.get_parameter_precision(
+    sigmas, cov, order, _snr = sef_mod.get_parameter_precision(
         INJ, duration=0.3, delta_t=10.0, use_gpu=False, tdi="off")
 
     assert np.array_equal(cov, cov.T)
@@ -223,7 +223,7 @@ def test_full_fisher_differentiates_every_sampled_parameter(recorded_sef):
     from emridispatch.parameters import (
         FEW_TO_INJECTION, PARAM_NAMES, VECTOR_TO_PHYSICAL)
 
-    sigmas, cov, order = sef_mod.get_parameter_precision(
+    sigmas, cov, order, _snr = sef_mod.get_parameter_precision(
         INJ, duration=0.3, delta_t=10.0, use_gpu=False, tdi="off", full=True)
     # Row i of the covariance is sampling-vector row i (masses linear).
     assert ([FEW_TO_INJECTION[k] for k in _Recorder.called["param_names"]]
@@ -241,7 +241,7 @@ def test_full_provider_splits_intrinsic_block(monkeypatch):
 
     def fake_gpp(params, *, full=False, **kwargs):
         seen["full"] = full
-        return dict(zip(order, np.sqrt(np.diag(cov)))), cov, order
+        return dict(zip(order, np.sqrt(np.diag(cov)))), cov, order, 30.0
 
     monkeypatch.setattr(sef_mod, "get_parameter_precision", fake_gpp)
     res = SEFFisherProvider(tdi="off", full=True).compute({}, duration=0.3, delta_t=10.0)
@@ -260,3 +260,59 @@ def test_fisher_full_needs_sef(monkeypatch):
         data=SimpleNamespace(tdi="off"))
     with pytest.raises(ValueError, match="fisher_full"):
         fisher_mod.get_fisher_provider(cfg)
+
+
+def test_provider_forwards_the_likelihood_notch(monkeypatch):
+    import emridispatch.fisher as fisher_mod
+
+    seen = {}
+
+    def fake_gpp(params, *, notch, notch_depth, **kwargs):
+        seen.update(notch=notch, notch_depth=notch_depth)
+        sig = dict.fromkeys(
+            ["mass_1", "mass_2", "a", "p", "e", "luminosity_distance"], 1.0)
+        return sig, np.eye(6), list(sig), 30.0
+
+    monkeypatch.setattr(sef_mod, "get_parameter_precision", fake_gpp)
+    cfg = SimpleNamespace(
+        prior=SimpleNamespace(fisher="sef", sigmas=None, covariance_file=None),
+        data=SimpleNamespace(tdi="off", psd_notch=3e-5, psd_notch_depth=1.5))
+    res = fisher_mod.get_fisher_provider(cfg).compute({}, duration=0.3, delta_t=10.0)
+    assert seen == {"notch": 3e-5, "notch_depth": 1.5}
+    assert res.snr == 30.0
+
+
+def test_wiring_passes_the_notch_to_the_sef_psd(recorded_sef):
+    seen = recorded_sef(tdi="off", foreground=False)
+    assert all(kw["notch"] == 1e-5 for kw in seen["noise_kwargs"])
+
+
+def test_positive_definite_fisher_passes():
+    sef_mod.check_positive_definite(_ill_conditioned_fisher(), list("abcdef"))
+
+
+def test_singular_fisher_names_the_degenerate_parameters():
+    # qK with (numerically) no curvature and phiK fully degenerate with Phi_phi0:
+    # the face-on injection's Fisher.
+    names = ["m1", "qK", "phiK", "Phi_phi0"]
+    F = np.diag([1.0, 1e-15, 1.0, 1.0])
+    F[2, 3] = F[3, 2] = 1.0 + 1e-9
+    with pytest.raises(ValueError, match="not positive definite") as err:
+        sef_mod.check_positive_definite(F, names)
+    assert "phiK" in str(err.value) and "Phi_phi0" in str(err.value)
+
+
+def test_fisher_with_zero_curvature_is_rejected():
+    with pytest.raises(ValueError, match="Gamma_ii <= 0.*qK"):
+        sef_mod.check_positive_definite(np.diag([1.0, 0.0]), ["m1", "qK"])
+
+
+def test_snr_mismatch_is_rejected():
+    from emridispatch.fisher import FisherResult, check_snr
+
+    sig = dict.fromkeys(
+        ["mass_1", "mass_2", "a", "p", "e", "luminosity_distance"], 1.0)
+    check_snr(FisherResult(sig, np.eye(6), list(sig), snr=31.0), 30.0)
+    check_snr(FisherResult(sig, np.eye(6), list(sig)), 30.0)       # unknown: pass
+    with pytest.raises(ValueError, match="378782"):
+        check_snr(FisherResult(sig, np.eye(6), list(sig), snr=378782.4), 30.0)

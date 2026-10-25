@@ -202,3 +202,21 @@ def test_full_fisher_rejects_inconsistent_intrinsic_block():
         build_prior_bounds(PREC, 4 * cov_full[:6, :6], list(INTRINSIC_ORDER), INJ,
                            TRUTH, "auto", IDX, angle_sigma=0.05, ndim=NDIM,
                            cov_full=cov_full)
+
+
+def test_sef_cache_key_carries_the_notch_and_full_flag():
+    from types import SimpleNamespace
+
+    from emridispatch.pipeline import fisher_key_from_config
+
+    def cfg(**prior):
+        return SimpleNamespace(
+            data=SimpleNamespace(tdi="2nd generation", foreground=True, duration=2.0,
+                                 delta_t=5.0, channels=["A", "E"], psd_notch=1e-5,
+                                 psd_notch_depth=2.0),
+            prior=SimpleNamespace(fisher="sef", sigmas=None, covariance_file=None,
+                                  **prior))
+
+    base = fisher_key_from_config(cfg())
+    assert base.endswith("|provider=sef|notch=1e-05,2")
+    assert fisher_key_from_config(cfg(fisher_full=True)) == base + "|full"

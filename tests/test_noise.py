@@ -111,3 +111,28 @@ def test_load_sensitivity_table_covers_generations():
     assert set(table) == {"off", "1st generation", "2nd generation"}
     assert table["off"]["I"] is table["off"]["II"]
     assert set(table["2nd generation"]) == {"A", "E", "T"}
+
+
+class _NullSens:
+    """A smooth PSD with a 5-decade null at 0.03 Hz, like TDI-2's c/4L."""
+
+    @staticmethod
+    def get_Sn(f, **kwargs):
+        f = np.asarray(f, float)
+        return 1e-40 * (1.0 + 1e13 * (f - 0.03) ** 2)
+
+
+def test_notched_psd_drops_the_null_bins():
+    f = np.linspace(1e-4, 0.05, 20001)
+    raw = channel_noise_psd(f, sens_cls=_NullSens)
+    notched = channel_noise_psd(f, sens_cls=_NullSens, notch=1e-5, notch_depth=2.0)
+    near = np.abs(f - 0.03) <= 1e-5
+    assert np.all(np.isinf(notched[near]))
+    far = np.abs(f - 0.03) > 1e-3
+    np.testing.assert_array_equal(notched[far], raw[far])
+
+
+def test_notch_kwargs_only_when_requested():
+    assert "notch" not in per_channel_noise_kwargs(0.3, False, ["A2"])[0]
+    kw = per_channel_noise_kwargs(0.3, False, ["A2"], notch=1e-5, notch_depth=1.5)[0]
+    assert kw["notch"] == 1e-5 and kw["notch_depth"] == 1.5
