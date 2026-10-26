@@ -207,3 +207,60 @@ def test_gpry_backend_checkpoint_and_resume_unpicklable_likelihood(toy_cfg):
     # Resume from the checkpoint with the live likelihood, as a resubmitted job does.
     second = backend.run(problem, toy_cfg, resume=True)
     assert second["n_truth_calls"] >= first["n_truth_calls"]
+
+
+def test_apply_acquisition_parses_xnumbers_and_rejects_unknown():
+    pytest.importorskip("gpry")
+    from types import SimpleNamespace
+
+    from emridispatch.backends.gpry import apply_acquisition
+
+    acq = SimpleNamespace(sampler="ultranest", mc_every=2, nlive_max=600)
+    apply_acquisition(acq, {"mc_every": "1d", "nlive_max": "10d",
+                            "precision_criterion_target": 0.05}, ndim=12)
+    assert (acq.mc_every, acq.nlive_max) == (12, 120)
+    assert acq.precision_criterion_target == 0.05
+    with pytest.raises(ValueError, match="cannot be applied on resume"):
+        apply_acquisition(acq, {"zeta": 1.0}, ndim=12)
+
+
+def test_gpry_backend_acquisition_settings_survive_resume(toy_cfg):
+    pytest.importorskip("gpry")
+    from gpry.run import Runner
+
+    from emridispatch.backends import get_backend
+
+    toy_cfg.prior.fixed = [n for n in PARAM_NAMES if n not in ("a", "e")]
+    toy_cfg.reparam.idx = [2, 4]
+    toy_cfg.prior.fisher = "manual"
+    toy_cfg.prior.sigmas = {"mass_1": 1.0e4, "mass_2": 1.0e-2, "a": 0.05,
+                            "p": 0.1, "e": 0.05, "luminosity_distance": 0.05}
+    toy_cfg.prior.box_scale = 5.0
+    toy_cfg.sampler.backend = "gpry"
+    toy_cfg.sampler.nsamples = 200
+    toy_cfg.sampler.gpry.max_total = 40
+    toy_cfg.sampler.gpry.nlive = 50
+    toy_cfg.sampler.gpry.verbose = 1
+    toy_cfg.sampler.gpry.acquisition = {"mc_every": 3, "nlive_max": "20d"}
+    problem = build_problem(toy_cfg)
+
+    seen = []
+    orig_run = Runner.run
+
+    def spy(self):
+        seen.append((self.acquisition.mc_every, self.acquisition.nlive_max,
+                     self.n_points_per_acq))
+        return orig_run(self)
+
+    backend = get_backend("gpry")
+    Runner.run = spy
+    try:
+        first = backend.run(problem, toy_cfg, resume=False)
+        toy_cfg.sampler.gpry.acquisition = {"mc_every": 1, "nlive_max": "30d"}
+        toy_cfg.sampler.gpry.n_points_per_acq = 4
+        backend.run(problem, toy_cfg, resume=True)
+    finally:
+        Runner.run = orig_run
+    assert seen[0][:2] == (3, 40)
+    assert seen[1] == (1, 60, 4)
+    assert first["config"]["acquisition"] == {"mc_every": 3, "nlive_max": "20d"}
