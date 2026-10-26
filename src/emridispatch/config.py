@@ -91,6 +91,10 @@ GPRY_DEFAULTS = {
     "n_initial": None, "max_initial": None, "max_total": None,
     "n_points_per_acq": None, "mc": "nested", "nlive": None,
     "prior_draws": 10000, "plots": False, "verbose": 3,
+    # NORA acquisition settings (mc_every, nlive_per_training, nlive_max,
+    # num_repeats, precision_criterion_target, nprior_per_nlive, max_ncalls,
+    # sampler); None keeps GPry's defaults.
+    "acquisition": None,
 }
 PRIOR_DEFAULTS = {
     "box_scale": 3.0, "fisher": "auto", "angle_sigma": 0.05,

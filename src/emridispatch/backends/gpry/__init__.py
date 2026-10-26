@@ -25,8 +25,10 @@ problem.wrapped() is mapped affinely to a box coordinate z, u = u0 + L z
 Periodic parameters are plain intervals to GPry (no periodic boundary).
 
 Config: sampler.gpry (domain, fisher_k, ref_scale, kernel, n_initial,
-max_initial, max_total, n_points_per_acq, mc, nlive, prior_draws, plots,
-verbose); sampler.nsamples is the number of posterior draws stored.
+max_initial, max_total, n_points_per_acq, mc, nlive, acquisition,
+prior_draws, plots, verbose); sampler.nsamples is the number of posterior
+draws stored. `acquisition` is passed to GPry's NORA acquisition and re-applied
+on resume, where GPry would otherwise restore the checkpointed settings.
 """
 
 import itertools
@@ -46,6 +48,30 @@ CHECKPOINT_DIR = "gpry_checkpoint"
 DOMAINS = ("prior", "fisher")
 # Above this many free dimensions the support box comes from draws only.
 MAX_CORNER_DIM = 14
+# NORA attributes that can be changed on a resumed run, and whether they are
+# GPry "X-numbers" in the dimension ("25d").
+NORA_RESUMABLE = {"mc_every": True, "nlive_per_training": False,
+                  "nlive_max": True, "num_repeats": True,
+                  "precision_criterion_target": False,
+                  "nprior_per_nlive": False, "max_ncalls": False}
+
+
+def apply_acquisition(acq, settings, ndim):
+    """Overwrite NORA precision settings on a (checkpoint-restored) acquisition."""
+    from gpry.tools import get_Xnumber
+
+    for key, value in settings.items():
+        if key == "sampler":
+            if value != getattr(acq, "sampler", value):
+                logger.warning("gpry: acquisition.sampler cannot change on resume "
+                               "(checkpoint uses %r)", acq.sampler)
+            continue
+        if key not in NORA_RESUMABLE:
+            raise ValueError(f"gpry: acquisition.{key} cannot be applied on resume; "
+                             f"allowed: {sorted(NORA_RESUMABLE)} and 'sampler'")
+        if value is not None and NORA_RESUMABLE[key]:
+            value = get_Xnumber(value, "d", ndim, int, key)
+        setattr(acq, key, value)
 
 
 def _coerce(o):
@@ -287,6 +313,7 @@ class GPryBackend:
             # GPry rejects max_total < max_initial (default 30 d^1.5).
             options["max_initial"] = min(int(30 * w.ndim ** 1.5),
                                          options["max_total"])
+        acq_settings = dict(g.acquisition or {})
         mc = str(g.mc)
         mc_spec = {mc: ({"nlive": int(g.nlive)} if g.nlive is not None else {})}
 
@@ -299,8 +326,19 @@ class GPryBackend:
             loglike=target, bounds=[list(b) for b in bounds],
             ref_bounds=ref_bounds, params=names, surrogate=g.kernel,
             initial_proposer="reference", mc=mc_spec, options=options or None,
+            gp_acquisition={"NORA": acq_settings} if acq_settings else None,
             checkpoint=ckpt, load_checkpoint="resume" if resume else "overwrite",
             seed=problem.seed, plots=bool(g.plots), verbose=int(g.verbose))
+
+        if runner.loaded_from_checkpoint:
+            # GPry restores the pickled acquisition and options; the config wins.
+            if acq_settings:
+                apply_acquisition(runner.acquisition, acq_settings, w.ndim)
+            if "n_points_per_acq" in options:
+                runner.options = dict(runner.options or {}, n_points_per_acq=options["n_points_per_acq"])
+                runner._construct_options(runner.options)
+        logger.info("gpry: acquisition %s", {k: getattr(runner.acquisition, k, None)
+                                             for k in NORA_RESUMABLE})
 
         t0 = time.perf_counter()
         runner.run()
@@ -343,6 +381,7 @@ class GPryBackend:
             "config": dict(problem.meta, backend=self.name, domain=domain,
                            fisher_k=float(g.fisher_k), ref_scale=g.ref_scale,
                            kernel=g.kernel, options=options, mc=mc_spec,
+                           acquisition=acq_settings,
                            nsamples=nsamples, seed=problem.seed,
                            gpry_version=gpry_version, mpi_size=mpi.SIZE),
             "converged": bool(runner.has_converged),
