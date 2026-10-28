@@ -33,6 +33,7 @@ def main(argv=None):
 
     import shutil
 
+    from emridispatch import mpi_utils
     from emridispatch.config import load_config
     from emridispatch.logging_utils import setup_logging
 
@@ -42,7 +43,8 @@ def main(argv=None):
     # the run dir is self-contained for emridispatch-postprocess.
     os.makedirs(cfg.run.outdir, exist_ok=True)
     dest = os.path.join(cfg.run.outdir, "config.yaml")
-    if os.path.abspath(args.config) != os.path.abspath(dest):
+    if (mpi_utils.is_main()
+            and os.path.abspath(args.config) != os.path.abspath(dest)):
         shutil.copyfile(args.config, dest)
 
     log_file = getattr(cfg.logging, "file", "run.log")
