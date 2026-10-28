@@ -18,7 +18,12 @@ def setup_logging(outdir=None, level="INFO", filename="run.log"):
 
     Idempotent: replaces prior handlers rather than stacking. Adds a file
     handler at <outdir>/<filename> only if both are given (dir auto-created).
+    In a multi-rank MPI run, ranks other than 0 only print warnings and
+    errors to the console (tagged with the rank) and never write the file.
     """
+    from emridispatch import mpi_utils
+
+    rank = mpi_utils.rank()
     logger = logging.getLogger(PACKAGE_LOGGER)
     if isinstance(level, str):
         level = getattr(logging, level.upper())
@@ -33,6 +38,11 @@ def setup_logging(outdir=None, level="INFO", filename="run.log"):
     console = logging.StreamHandler()
     console.setFormatter(fmt)
     logger.addHandler(console)
+    if rank != 0:
+        console.setFormatter(logging.Formatter(f"[rank {rank}] {_FORMAT}",
+                                               datefmt=_DATEFMT))
+        console.setLevel(logging.WARNING)
+        return logger
 
     if outdir is not None and filename:
         os.makedirs(outdir, exist_ok=True)
