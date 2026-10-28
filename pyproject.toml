@@ -21,6 +21,9 @@ dependencies = [
 impulse = ["impulse-mcmc"]
 eryn = ["eryn"]
 gpry = ["gpry>=4.1"]
+# Multi-rank gpry (mpirun -n N). On a cluster build mpi4py against the site
+# MPI instead: MPICC=$(which mpicc) pip install --no-binary=mpi4py mpi4py
+mpi = ["mpi4py"]
 # TDI / waveform / PSD response via lisa-analysis-tools + FastEMRIWaveforms.
 lisatools = [
     "lisaanalysistools @ git+https://github.com/thompsonphys/lisa-analysis-tools.git@dev",
