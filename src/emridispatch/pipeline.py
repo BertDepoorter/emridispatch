@@ -10,6 +10,7 @@ import os
 
 import numpy as np
 
+from emridispatch import mpi_utils
 from emridispatch.backends import get_backend
 from emridispatch.backends.base import SamplingProblem
 from emridispatch.bounds import (
@@ -190,24 +191,30 @@ def build_problem(cfg, resume=True):
     reparam_idx = np.array(cfg.reparam.idx)
     box_scale = float(cfg.prior.box_scale)
 
+    # Every MPI rank needs its own likelihood; the outdir files and the Fisher
+    # are rank 0's alone (one SEF on the GPU, no concurrent cache writes).
     model = build_injection_model(cfg)
     logger.info("injection SNR = %.4f (dist=%.4f)", model.optimal_snr,
                 float(model.injection_parameters["luminosity_distance"]))
 
     truth_vec = truth_vector(model.injection_parameters)
-    _write_injection_truth(outdir, model.injection_parameters, truth_vec)
+    main = mpi_utils.is_main()
+    if main:
+        _write_injection_truth(outdir, model.injection_parameters, truth_vec)
 
     # Prior-bounds cache: compute the (possibly expensive) Fisher box once,
     # reuse thereafter.
     bounds_cache = cache_path(outdir)
-    fisher_key = fisher_key_from_config(cfg)
-    if resume and os.path.exists(bounds_cache):
-        mins, maxes, sample_cov, reparam, reparam_mode = load_prior_bounds(
-            bounds_cache, ndim, reparam_idx, reparam_mode, box_scale=box_scale,
-            fisher_key=fisher_key)
-        logger.info("resuming: loaded cached prior bounds + proposal from %s "
-                    "(Fisher skipped)", bounds_cache)
-    else:
+
+    def prior_bounds():
+        fisher_key = fisher_key_from_config(cfg)
+        if resume and os.path.exists(bounds_cache):
+            bounds = load_prior_bounds(
+                bounds_cache, ndim, reparam_idx, reparam_mode,
+                box_scale=box_scale, fisher_key=fisher_key)
+            logger.info("resuming: loaded cached prior bounds + proposal from "
+                        "%s (Fisher skipped)", bounds_cache)
+            return bounds
         provider = get_fisher_provider(cfg)
         logger.info("fisher: computing via %r provider", provider.name)
         fisher = provider.compute(
@@ -227,6 +234,10 @@ def build_problem(cfg, resume=True):
         logger.info("first run: computed prior bounds + proposal via %r "
                     "(box_scale=%g), cached to %s",
                     provider.name, box_scale, bounds_cache)
+        return mins, maxes, sample_cov, reparam, reparam_mode
+
+    mins, maxes, sample_cov, reparam, reparam_mode = mpi_utils.run_on_main(
+        prior_bounds)
 
     # A NaN box (non-PD Fisher) or a cache built for another injection.
     if not np.all((truth_vec >= mins) & (truth_vec <= maxes)):
@@ -244,19 +255,22 @@ def build_problem(cfg, resume=True):
 
     # Persist the final per-parameter prior specs so postprocessing can
     # reconstruct the JointPrior (prior draws, reweighting) without the config.
-    try:
-        prior_spec = prior.spec()
-    except TypeError as exc:
-        logger.warning("prior spec not serialized: %s", exc)
-    else:
-        with open(os.path.join(outdir, "prior_spec.json"), "w") as fh:
-            json.dump(prior_spec, fh, indent=2)
+    if main:
+        try:
+            prior_spec = prior.spec()
+        except TypeError as exc:
+            logger.warning("prior spec not serialized: %s", exc)
+        else:
+            with open(os.path.join(outdir, "prior_spec.json"), "w") as fh:
+                json.dump(prior_spec, fh, indent=2)
 
-    reparam.save(os.path.join(outdir, "reparam_transform.npz"), reparam_mode)
+        reparam.save(os.path.join(outdir, "reparam_transform.npz"),
+                     reparam_mode)
     logger.info("reparam: mode=%s, block dims=%s", reparam_mode, list(reparam.idx))
 
     fixed = resolve_fixed(cfg.prior.fixed, truth_vec, reparam.idx, reparam_mode)
-    _write_fixed(outdir, fixed)
+    if main:
+        _write_fixed(outdir, fixed)
     if fixed:
         logger.info("fixed: %s", {PARAM_NAMES[i]: v for i, v in sorted(fixed.items())})
 
@@ -291,6 +305,13 @@ def run_from_config(cfg, resume=True):
     """
     backend_name = str(cfg.sampler.backend)
     backend = get_backend(backend_name)
+    nranks = mpi_utils.size()
+    if nranks > 1 and backend_name not in mpi_utils.MPI_BACKENDS:
+        # Each rank would run its own sampler into the same outdir.
+        raise ValueError(
+            f"launched as {nranks} MPI ranks, but backend {backend_name!r} is "
+            f"serial; run it without mpirun/srun (MPI backends: "
+            f"{list(mpi_utils.MPI_BACKENDS)})")
     log_versions(cfg)
     problem = build_problem(cfg, resume=resume)
     logger.info("backend: %s", backend_name)
